@@ -14,6 +14,7 @@ import { UPSTREAMS, catalogFor, coolDownFrom, isBlocked, postStream, resolveMode
 import { readStream } from './parse.js'
 import { estimateTokens } from './ledger.js'
 import { ROUTE_KIND, hostOf } from './router.js'
+import { VERIFIED_MODELS, filterVerified } from './models.js'
 
 export const ROUTE = 'freebridge'
 export const ROUTE_LABEL = 'FreeBridge'
@@ -77,23 +78,47 @@ export class FreeBridgeAdapter {
     }
   }
 
-  /** 当前该 route 对外暴露的模型。 */
+  /** 当前该 route 对外暴露的模型。
+   *
+   * 只暴露实测可用的模型 —— 不可用的直接从选择器剔除，
+   * 避免用户点到就报错（这是用户明确要求的行为）。
+   */
   async listModels(provider) {
     const settings = this.deps.settings()
     const enabled = enabledUpstreams(settings)
     const rows = []
+    const seen = new Set()
+
     for (const upstreamId of enabled) {
       const catalog = await catalogOf(upstreamId)
-      for (const id of catalog) {
+      // 只留实测可用的
+      const usable = filterVerified(catalog, settings?.strictModels !== false)
+      for (const id of usable) {
+        if (seen.has(id)) continue
+        seen.add(id)
         rows.push({
           provider,
           id,
           name: displayName(upstreamId, id),
-          description: `${UPSTREAMS[upstreamId].label} · anonymous free tier`,
+          description: `${UPSTREAMS[upstreamId].label} · 已实测可用`,
           inputModalities: ['text'],
         })
       }
     }
+
+    // 白名单模型即使上游目录拉不到也照样暴露（保证用户始终有可用模型）
+    for (const model of VERIFIED_MODELS) {
+      if (seen.has(model.id)) continue
+      seen.add(model.id)
+      rows.push({
+        provider,
+        id: model.id,
+        name: model.name,
+        description: model.note,
+        inputModalities: model.tier === 'vision' ? ['text', 'image'] : ['text'],
+      })
+    }
+
     return rows
   }
 
