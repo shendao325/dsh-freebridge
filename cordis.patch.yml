@@ -1,0 +1,40 @@
+# FreeBridge 默认配置 —— 装完即用，全部有默认值
+# 高级用户才需要动这些；小白一行都不用改
+- id: freebridge
+  name: dsh-freebridge
+  config:
+    enabled: true
+
+    # 匿名上游：主力 + 备用
+    kilo:
+      enabled: true
+      weight: 20
+    ovh:
+      enabled: true
+      weight: 6
+
+    # 模块一：Token 用量统计
+    ledger:
+      enabled: true
+      showAttemptLevel: false   # 默认看逻辑级，展开看尝试级
+      includeBranch: false      # 默认不含旁支提问
+
+    # 模块二：按需网络分流
+    routing:
+      enabled: true
+      probeTimeoutMs: 4000
+      separateWebRoute: true    # 模型 API 与网页抓取分开路由
+      followSystemProxy: true   # 跟随本机已有代理客户端
+
+    # 模块三：桌面操作编排
+    desktop:
+      enabled: true
+      autoLaunch: true
+
+    # 模块四：操作边界守门（计划书要求默认开启）
+    guard:
+      enabled: true
+      useAiReview: false        # 灰色地带可选交给小模型审查
+
+    # 状态与统计接口
+    exposeHealth: true

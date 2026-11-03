@@ -1,0 +1,60 @@
+{
+  "name": "dsh-freebridge",
+  "version": "3.0.0",
+  "type": "module",
+  "description": "FreeBridge — DSH 一体化插件：免账号桥接匿名免费 LLM + Token 用量统计 + 按需网络分流 + 桌面操作编排 + 操作边界守门 + 插件级故障隔离，装完即用",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "src",
+    "cordis.patch.yml",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node test/all.mjs",
+    "test:ledger": "node test/ledger.test.mjs",
+    "test:router": "node test/router.test.mjs",
+    "test:guard": "node test/guard.test.mjs",
+    "test:desktop": "node test/desktop.test.mjs",
+    "test:bootstrap": "node test/bootstrap.test.mjs",
+    "test:supervisor": "node test/supervisor.test.mjs",
+    "test:integration": "node test/integration.test.mjs",
+    "test:host": "node test/host.test.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "free-model",
+    "llm-provider",
+    "keyless",
+    "kilo",
+    "token-usage",
+    "network-routing",
+    "desktop-automation",
+    "operation-guard"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": false,
+      "inject": []
+    }
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-llm": "^0.1.2-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.4"
+  }
+}
