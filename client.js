@@ -53,6 +53,18 @@ window.__ModuleLoader__.load({
         'stats.byDay': '按日趋势',
         'stats.estimated': '含估算',
         'stats.empty': '还没有用量数据，发起一次对话后这里会显示',
+        'stats.historyTitle': '历史会话总用量',
+        'stats.historyHint': '扫描全部会话文件（含归档），装插件前的用量也算在内',
+        'stats.historySessions': '会话',
+        'stats.historyTurns': '轮',
+        'stats.historyMsgs': '消息',
+        'stats.rescan': '重新扫描',
+
+        'models.title': '可用模型',
+        'models.hint': '只列出实测能正常回复的模型；不可用的已剔除，不会出现在选择器',
+        'models.verified': '已验证可用',
+        'models.excluded': '已剔除',
+        'models.best': '推荐',
 
         'sessions.title': '会话统计',
         'sessions.hint': '点击会话先看总量，再展开看供应商与模型',
@@ -344,6 +356,19 @@ window.__ModuleLoader__.load({
             h('button', { style: S.seg(level === 'attempt'), onClick: () => setLevel('attempt') }, t('stats.level.attempt')),
             h('button', { style: S.btn, onClick: reload }, t('refresh')))),
 
+        // ── 历史会话总用量（全部会话，包含归档、包含装插件前）──
+        data?.history?.available === true
+          ? h('div', { style: { marginBottom: 14, padding: '10px 12px', borderRadius: 8, background: 'var(--color-bg-tertiary, rgba(128,128,128,.08))' } },
+            h('div', { style: { fontSize: 12.5, fontWeight: 600, marginBottom: 2 } }, t('stats.historyTitle')),
+            h('div', { style: { fontSize: 11, opacity: 0.6, marginBottom: 8 } }, t('stats.historyHint')),
+            h('div', { style: S.row },
+              h(Stat, { label: t('stats.total'), value: nf(data.history.totalTokens) }),
+              h(Stat, { label: t('stats.input'), value: nf(data.history.inputTokens) }),
+              h(Stat, { label: t('stats.output'), value: nf(data.history.outputTokens) }),
+              h(Stat, { label: t('stats.historySessions'), value: String(data.history.sessions?.length ?? 0) }),
+              h(Stat, { label: t('stats.historyTurns'), value: String(data.history.turns ?? 0) })))
+          : null,
+
         totals.requests === 0
           ? h('div', { style: { fontSize: 12, opacity: 0.6, padding: '6px 0' } }, t('stats.empty'))
           : h(React.Fragment, null,
@@ -467,6 +492,46 @@ window.__ModuleLoader__.load({
     }
 
     // ── 分流（模块二）────────────────────────────────────────────────────────
+    // ── 可用模型表 ──────────────────────────────────────────────────────────
+    function ModelsSection({ t }) {
+      const { loading, data, error, reload } = useApi('/freebridge/models')
+      if (loading) return h(Loading, { t })
+      if (error !== null) return h(Failed, { t, error, onRetry: reload })
+
+      const verified = data?.verified ?? []
+      const excluded = data?.excluded ?? []
+
+      return h('div', { style: S.card },
+        h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 } },
+          h('div', null,
+            h('h2', { style: S.h2 }, t('models.title')),
+            h('div', { style: S.hint }, t('models.hint'))),
+          h('button', { style: S.btn, onClick: reload }, t('refresh'))),
+
+        h('div', { style: { fontSize: 12, fontWeight: 600, margin: '4px 0 6px' } },
+          `${t('models.verified')} (${verified.length})`),
+        h('table', { style: S.table },
+          h('tbody', null,
+            verified.map(m => h('tr', { key: m.id },
+              h('td', { style: S.td },
+                h('span', { style: S.pill(m.tier === 'best' ? 'ok' : 'n') },
+                  m.tier === 'best' ? t('models.best') : m.tier)),
+              h('td', { style: { ...S.td, fontFamily: 'monospace', fontSize: 11.5 } }, m.id),
+              h('td', { style: { ...S.td, fontSize: 11, opacity: 0.7 } }, m.note ?? '')))))
+
+        , excluded.length > 0
+          ? h('div', { style: { marginTop: 12 } },
+            h('div', { style: { fontSize: 12, fontWeight: 600, marginBottom: 6, opacity: 0.7 } },
+              `${t('models.excluded')} (${excluded.length})`),
+            h('table', { style: S.table },
+              h('tbody', null,
+                excluded.map(m => h('tr', { key: m.id },
+                  h('td', { style: { ...S.td, fontFamily: 'monospace', fontSize: 11, opacity: 0.6 } }, m.id),
+                  h('td', { style: { ...S.td, fontSize: 11, opacity: 0.55 } }, m.reason))))))
+          : null
+      )
+    }
+
     function RoutesSection({ t }) {
       const { loading, data, error, reload } = useApi('/freebridge/routes')
       if (loading) return h(Loading, { t })
@@ -547,6 +612,7 @@ window.__ModuleLoader__.load({
         h(HealthSection, { t, onAnyRestart: bump }),
         h(StatsSection, { t }),
         h(SessionsSection, { t }),
+        h(ModelsSection, { t }),
         h(RoutesSection, { t }),
         h(GuardSection, { t }),
         h(DesktopSection, { t }))
