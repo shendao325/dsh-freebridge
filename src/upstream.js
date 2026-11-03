@@ -138,14 +138,35 @@ export async function catalogFor(upstreamId) {
  * @param {string} wanted
  * @returns {Promise<string>}
  */
-export async function resolveModel(upstreamId, wanted) {
+export async function resolveModel(upstreamId, wanted, options = {}) {
   const ids = await catalogFor(upstreamId)
   if (ids.length === 0) return wanted
+
+  /**
+   * 先剥掉宿主可能加的前缀。
+   *
+   * DSH 传入的模型名可能带 route 前缀，例如 "freebridge::kilo-auto/free"，
+   * 甚至层层嵌套。不剥掉就会导致精确匹配失败 —— 这是实机报
+   * "kilo: model-rejected" 的直接原因（它静默降级到一个坏掉的模型）。
+   */
+  const clean = stripPrefixes(wanted)
+
+  if (ids.includes(clean)) return clean
   if (ids.includes(wanted)) return wanted
 
-  const stripped = wanted.replace(/:free$/, '')
-  const fuzzy = ids.find(id => id === stripped || id.startsWith(stripped) || id.includes(stripped))
+  // 去掉 :free 后缀再试
+  const stripped = clean.replace(/:free$/, '')
+  const fuzzy = ids.find(id =>
+    id === stripped ||
+    id === `${stripped}:free` ||
+    id.startsWith(stripped + ':')
+  )
   if (fuzzy !== undefined) return fuzzy
+
+  // 用户明确要的模型不存在时，只在允许降级的情况下才换
+  if (options.allowFallback === false) {
+    throw new Error(`model "${clean}" not available on ${upstreamId}`)
+  }
 
   for (const preferred of PREFERRED) {
     if (ids.includes(preferred)) return preferred
@@ -153,6 +174,23 @@ export async function resolveModel(upstreamId, wanted) {
   const freeIds = ids.filter(id => /free/i.test(id))
   if (freeIds.length > 0) return freeIds[0]
   return ids[0]
+}
+
+/**
+ * 剥掉模型名前缀。
+ * - "freebridge::xxx" → "xxx"
+ * - "freebridge/xxx"  → "xxx"（仅当前缀是已知 route 名）
+ * - 多层嵌套循环剥
+ */
+export function stripPrefixes(name) {
+  let s = String(name ?? '')
+  // route::model
+  while (true) {
+    const m = s.match(/^[a-zA-Z0-9_-]+::(.*)$/)
+    if (m === null) break
+    s = m[1]
+  }
+  return s.trim()
 }
 
 /**
