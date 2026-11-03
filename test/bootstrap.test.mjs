@@ -23,7 +23,7 @@ check('桌面编排默认开', cfg.desktop.enabled === true)
 
 const deep = resolveConfig({ kilo: { weight: 99 } })
 check('部分配置能合并', deep.kilo.weight === 99)
-check('合并后其余字段仍有默认值', deep.kilo.enabled === true && deep.ovh.enabled === true)
+check('合并后其余字段仍有默认值', deep.kilo.enabled === true && deep.ovh.enabled === false)
 check('传入 null 不炸', resolveConfig(null).enabled === true)
 check('传入错误类型不炸', resolveConfig('bad').kilo.enabled === true)
 
@@ -73,7 +73,7 @@ const probeResult = await probeUpstreams({
   warn: m => console.log('    warn: ' + m),
 })
 check('可用通道识别正确', probeResult.available.includes('kilo'))
-check('不可用通道被标记但不阻断', probeResult.unavailable.includes('ovh'))
+check('ovh 默认关闭，不参与探测', probeResult.unavailable.length === 0)
 check('汇总到可用模型', probeResult.models.length === 2)
 
 const allDown = await probeUpstreams({
@@ -81,7 +81,7 @@ const allDown = await probeUpstreams({
   probeUpstream: async () => { throw new Error('all down') },
   warn: () => {},
 })
-check('全部不可用也不抛错', allDown.available.length === 0 && allDown.unavailable.length === 2)
+check('全部不可用也不抛错', allDown.available.length === 0 && allDown.unavailable.length === 1)
 
 console.log('\n[5] 首启完整闭环')
 const booted = await bootstrap({
@@ -92,7 +92,7 @@ const booted = await bootstrap({
 })
 check('bootstrap 返回 ready', booted.ready === true)
 check('返回了完整配置', booted.config.kilo.enabled === true)
-check('附带探测结果（两条通道都开了）', booted.probe.available.length === 2, `实际 ${booted.probe.available.length}`)
+check('附带探测结果（默认只 kilo 一条）', booted.probe.available.length === 1, `实际 ${booted.probe.available.length}`)
 check('降级通道清单存在', Array.isArray(booted.degradedUpstreams))
 
 console.log('\n[5] 装完即用（不要求用户填任何东西）')
