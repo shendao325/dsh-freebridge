@@ -21,6 +21,8 @@ import { OperationGuard } from './src/guard.js'
 import { DesktopOrchestrator, CAPABILITY } from './src/desktop.js'
 import { Supervisor, STATE } from './src/supervisor.js'
 import { bootstrap, resolveConfig, Onboarding, ONBOARDING_QUESTIONS } from './src/bootstrap.js'
+import { scanAllSessions, defaultSessionsRoot } from './src/history.js'
+import { modelTable } from './src/models.js'
 
 export const name = 'freebridge'
 
@@ -320,6 +322,50 @@ export function apply(ctx, config = {}) {
     }
   })
 
+  // ── 历史会话统计（模块一核心：全部会话、装插件前后都算） ──
+  let historyCache = null
+  let historyAt = 0
+
+  /**
+   * 扫描历史会话，带 5 分钟缓存。
+   * 扫描失败返回 null，绝不影响主流程。
+   */
+  function scanHistory(force = false) {
+    const now = Date.now()
+    if (!force && historyCache !== null && now - historyAt < 5 * 60 * 1000) {
+      return historyCache
+    }
+    try {
+      historyCache = scanAllSessions({ sessionsRoot: defaultSessionsRoot(), warn })
+      historyAt = now
+      logger.info?.(`[freebridge] history: ${historyCache.parsed} sessions, ${historyCache.totalTokens} tokens`)
+      return historyCache
+    } catch (error) {
+      warn(`freebridge: history scan failed: ${error?.message ?? error}`)
+      return null
+    }
+  }
+
+  /** 给 stats 用的历史简要快照 */
+  function historySnapshot() {
+    const data = scanHistory()
+    if (data === null) return { available: false }
+    return {
+      available: true,
+      sessions: data.sessions ?? [],
+      inputTokens: data.inputTokens,
+      outputTokens: data.outputTokens,
+      reasoningTokens: data.reasoningTokens,
+      totalTokens: data.totalTokens,
+      turns: data.turns,
+      messages: data.messages,
+      scannedFiles: data.files,
+      parsedFiles: data.parsed,
+      byModel: data.byModel,
+      byProvider: data.byProvider,
+    }
+  }
+
   function handleHttp(url, req, res) {
     const parsed = new URL(url, 'http://localhost')
     const route = parsed.pathname
@@ -346,14 +392,49 @@ export function apply(ctx, config = {}) {
       const includeBranch = parsed.searchParams.get('branch') === '1'
       const ledger = supervisor.get('ledger')
       if (ledger === null) return sendJson({ error: 'ledger module unavailable' }, 503)
-      return sendJson(ledger.globalStats({ level, branch: includeBranch }))
+      const stats = ledger.globalStats({ level, branch: includeBranch })
+      // 附带历史扫描汇总：不管归档与否、装插件前后，全部会话都算进来
+      return sendJson({ ...stats, history: historySnapshot() })
     }
 
-    // 会话列表
+    // 历史会话全量统计（直接扫磁盘，不依赖 DSH 是否加载过）
+    if (route === '/freebridge/history') {
+      const data = scanHistory(parsed.searchParams.get('refresh') === '1')
+      if (data === null) return sendJson({ error: 'history scan failed' }, 500)
+      return sendJson(data)
+    }
+
+    // 可用模型表（白名单 + 已剔除清单）
+    if (route === '/freebridge/models') {
+      return sendJson(modelTable())
+    }
+
+    // 会话列表（实时账本 + 历史会话合并）
     if (route === '/freebridge/sessions') {
       const ledger = supervisor.get('ledger')
       if (ledger === null) return sendJson({ error: 'ledger module unavailable' }, 503)
-      return sendJson({ sessions: ledger.sessions() })
+      const history = historySnapshot()
+      const merged = new Map()
+      for (const s of ledger.sessions()) merged.set(s.sessionId, { ...s, source: 'live' })
+      for (const h of history.sessions ?? []) {
+        const prev = merged.get(h.sessionId)
+        if (prev === undefined) {
+          merged.set(h.sessionId, {
+            sessionId: h.sessionId,
+            startAt: h.startAt ?? 0,
+            endAt: h.endAt ?? h.startAt ?? 0,
+            durationMs: (h.endAt ?? 0) - (h.startAt ?? 0),
+            turns: h.turns,
+            logicalTokens: h.totalTokens,
+            attemptTokens: h.totalTokens,
+            source: 'history',
+          })
+        } else {
+          prev.logicalTokens = Math.max(prev.logicalTokens, h.totalTokens)
+          prev.source = 'both'
+        }
+      }
+      return sendJson({ sessions: [...merged.values()].sort((a, b) => (b.endAt ?? 0) - (a.endAt ?? 0)) })
     }
 
     // 单会话明细（总 -> 供应商 -> 模型）
