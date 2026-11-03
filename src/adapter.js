@@ -276,10 +276,14 @@ export class FreeBridgeAdapter {
 
     let model
     try {
-      model = await resolveModel(upstreamId, wantedModel)
+      // 不允许静默降级：用户点的是哪个模型就用哪个。
+      // 之前允许降级会导致「点了 nemotron 实际跑的是别的模型」，
+      // 而且降级目标一旦坏了就报 model-rejected，看起来像是模型不可用。
+      model = await resolveModel(upstreamId, wantedModel, { allowFallback: false })
     } catch (error) {
-      this.deps.warn?.(`freebridge: model resolve failed on ${upstreamId}: ${error?.message ?? error}`)
-      return 'resolve-failed'
+      // 这个上游没有该模型：只跳过，不当作上游故障
+      this.deps.warn?.(`freebridge: ${upstreamId} has no model "${wantedModel}": ${error?.message ?? error}`)
+      return 'no-model'
     }
 
     const payload = buildPayload(model, options)
