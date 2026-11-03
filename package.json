@@ -1,6 +1,6 @@
 {
   "name": "dsh-freebridge",
-  "version": "3.0.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "FreeBridge — DSH 一体化插件：免账号桥接匿名免费 LLM + Token 用量统计 + 按需网络分流 + 桌面操作编排 + 操作边界守门 + 插件级故障隔离，装完即用",
   "main": "./index.js",
