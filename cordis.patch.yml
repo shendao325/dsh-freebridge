@@ -9,12 +9,16 @@
       config:
         enabled: true
 
-        # 匿名上游：主力 + 备用
+        # 匿名上游
+        #
+        # ovh 默认关闭：它只提供 4 个 Llama/Qwen 模型，没有用户实际要的那些，
+        # 开着会让每次请求多跳一次失败（表现为 "ovh: server-error"），
+        # 拖慢响应还误导排查。需要时可在 profile 的 patch 里单独打开。
         kilo:
           enabled: true
           weight: 20
         ovh:
-          enabled: true
+          enabled: false
           weight: 6
 
         # 模块一：Token 用量统计
