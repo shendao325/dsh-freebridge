@@ -15,7 +15,7 @@ const destDir = path.join(profileDir, 'node_modules', 'dsh-freebridge')
  * 拷贝到 profile/node_modules 后，resolve 命中 profile 的依赖，一切正常。
  */
 
-const SKIP = new Set(['.git', 'node_modules', '.gitignore', 'tools'])
+const SKIP = new Set(['.git', 'node_modules', '.gitignore', 'tools', 'test'])
 
 function copyDir(src, dest) {
   fs.mkdirSync(dest, { recursive: true })

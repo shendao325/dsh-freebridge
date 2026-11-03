@@ -1,19 +1,30 @@
-fix: inject 守卫违规导致实机激活失败（显示异常根因）
+feat: 补齐 adapter 契约 + 做出设置页 UI（两处实机报错修复）
 
-【真凶】
-resolveDataDir 读了 ctx.storagePath，cordis 的 inject 守卫直接抛
-"cannot get property storagePath without inject"，整个插件激活失败，
-于是界面一直显示异常、所有功能不可用。
+【报错 1】registration.adapter.resolveModel is not a function
+adapter 缺 resolveModel / prepareCall 两个宿主必需方法。
+对照 dsh-our-free-model 的真实 adapter（7 个方法），我只实现了 5 个。
+现已补齐，并新增 contract.test.mjs 逐方法校验 37 项。
 
-【为什么之前测试没测出】
-假 ctx 是普通对象，没有 fiber.runtime，守卫根本不触发。
-所以测试全绿，实机必崩。测试方法本身是错的。
+【报错 2】设置页里什么功能都没有
+之前删掉了 dsh.client 声明，插件完全没有浏览器半边，
+所以 Token 统计/分流/守门/桌面/模块状态在界面上一个都看不到。
 
-【本次修复】
-1. resolveDataDir 改用 os.homedir() / $DSH_HOME / tmpdir，完全不碰 ctx
-2. 移除 ctx.desktopControl 直读，改用 ctx.get() 查询接口
-3. 新增 inject-guard.test.mjs：用 app.plugin() 创建真实 fiber 让守卫生效，
-   并内置对照实验证明测试自身有检测能力。
-   已反向验证：注入该 bug 后测试精确复现同样错误。
+现已实现 client.js（设置页 UI）：
+- 模块状态面板 + 单模块重启按钮
+- Token 用量：逻辑级/尝试级切换、按渠道、按模型、按日趋势
+- 会话统计：点击展开，会话 -> 供应商 -> 模型 三层下钻，
+  显示主线/旁支/已编辑/已撤回标记与切换段
+- 网络分流：直连/代理统计、节点健康
+- 操作守门：开关状态与规则数
+- 桌面编排：已接入能力与已登记应用
+- 首次引导卡片（全部用默认值按钮）
 
-11 套件 272 断言全部通过。
+并用 window.__ModuleLoader__ 契约加载（无需构建，复用 shell 的 react），
+package.json 恢复 dsh.client 并补 ./client 导出。
+
+新增测试：
+- contract.test.mjs（37 项，adapter 契约逐方法）
+- client.test.mjs（33 项，UI 契约与六模块覆盖）
+- client-render.test.mjs（14 项，真实执行 client.js 并渲染）
+
+14 套件 356 断言全部通过。

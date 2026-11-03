@@ -103,6 +103,53 @@ export class FreeBridgeAdapter {
    * @param {object} options - GenerateOptions（含 model / messages / signal）
    * @param {object|null} pinned - prepareCall 冻结的目录行
    */
+  /**
+   * 解析单个模型的元数据。
+   *
+   * 这是宿主必需的契约方法（截图里 "registration.adapter.resolveModel
+   * is not a function" 就是因为缺它）。宿主用它拿上下文窗口和输出上限，
+   * 决定预算、压缩阈值、pill 显示等。
+   *
+   * @param {string} provider
+   * @param {string} model
+   */
+  async resolveModel(provider, model) {
+    const base = String(model).split('::')[0]
+    const upstreamId = enabledUpstreams(this.deps.settings())[0] ?? 'kilo'
+    let canonical = base
+    try {
+      canonical = await resolveModel(upstreamId, base)
+    } catch {
+      // 解析失败就用原名，不影响对话
+    }
+
+    return {
+      provider,
+      id: base,
+      name: displayName(upstreamId, canonical),
+      inputModalities: ['text'],
+      context: { contextWindow: 131072 },
+      defaultMaxTokens: 8192,
+    }
+  }
+
+  /**
+   * 绑定一次调用的模型元数据与流式闭包。
+   *
+   * 宿主在发起一轮前调用它，拿到 { model, stream }。
+   * 把 stream 闭包绑在这里，可以保证中途目录刷新不会把两代状态混在一起。
+   *
+   * @param {string} provider
+   * @param {string} model
+   */
+  async prepareCall(provider, model) {
+    const resolved = await this.resolveModel(provider, model)
+    return {
+      model: resolved,
+      stream: options => this.stream(options, null),
+    }
+  }
+
   stream(options, pinned) {
     const controller = new AbortController()
     const onAbort = () => controller.abort(options.signal?.reason)

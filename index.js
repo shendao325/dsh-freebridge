@@ -393,6 +393,23 @@ export function apply(ctx, config = {}) {
       return sendJson({ ...onboarding.snapshot(), questions: ONBOARDING_QUESTIONS })
     }
 
+    // UI 的「全部用默认值」按钮
+    if (route === '/freebridge/onboarding/accept-defaults') {
+      onboarding.acceptDefaults()
+      saveOnboarding(dataDir, onboarding, warn)
+      return sendJson({ ok: true, ...onboarding.snapshot() })
+    }
+
+    // UI 的单题作答
+    if (route === '/freebridge/onboarding/answer') {
+      const id = parsed.searchParams.get('id')
+      const raw = parsed.searchParams.get('value')
+      if (id === null) return sendJson({ error: 'missing ?id=' }, 400)
+      const result = onboarding.answer(id, raw !== 'false')
+      saveOnboarding(dataDir, onboarding, warn)
+      return sendJson({ ...result, ...onboarding.snapshot() })
+    }
+
     // 单独重启某个模块（计划书模块六）
     if (route === '/freebridge/restart') {
       const moduleName = parsed.searchParams.get('module')
@@ -510,6 +527,19 @@ function resolveDataDir() {
 
   // 4. 最后兜底：当前目录（连临时目录都写不了的话）
   return process.cwd()
+}
+
+/** 保存引导答案（UI 点按钮后调用） */
+function saveOnboarding(dataDir, onboarding, warn) {
+  try {
+    const file = path.join(dataDir, 'onboarding.json')
+    FileSystem.mkdirSync(dataDir, { recursive: true })
+    FileSystem.writeFileSync(file, JSON.stringify(onboarding.snapshot().answers, null, 2), 'utf8')
+    return true
+  } catch (error) {
+    warn?.(`freebridge: onboarding save failed: ${error?.message ?? error}`)
+    return false
+  }
 }
 
 /** 读引导答案（存过就复用，坏了就当没存过） */
