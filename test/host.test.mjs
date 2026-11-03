@@ -48,7 +48,8 @@ for (let i = 0; i < 24; i += 1) {
 
 check('插件 name 正确', name === 'freebridge')
 check('声明了 llm 依赖', inject.includes('llm'))
-check('Config schema 存在', typeof Config === 'object' && Config.guard !== undefined)
+check('Config schema 存在（schemastery schema 是函数）', typeof Config === 'function')
+check('Config 能补全默认值（否则宿主启动会崩）', Config({})?.guard?.enabled === true)
 check('注册了 adapter', registered.adapters.length === 1, `adapters=${registered.adapters.length}`)
 check('adapter 挂在 freebridge route', registered.adapters[0]?.routes?.includes('freebridge') === true)
 check('注册了 provider 显示名', registered.providers.length >= 1 && registered.providers[0].displayName === 'FreeBridge')

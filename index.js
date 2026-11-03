@@ -11,6 +11,7 @@
 
 import path from 'node:path'
 import FileSystem from 'node:fs'
+import z from '@deepseek-ai/schemastery'
 
 import { FreeBridgeAdapter, ROUTE, statusSnapshot } from './src/adapter.js'
 import { TokenLedger } from './src/ledger.js'
@@ -24,62 +25,62 @@ export const name = 'freebridge'
 
 export const inject = ['llm']
 
-/** 设置项 schema。全部有默认值，小白不用碰。 */
-export const Config = {
-  enabled: { type: 'boolean', default: true, description: '启用 FreeBridge' },
-  kilo: {
-    type: 'object',
-    description: 'Kilo Gateway（匿名免费，主力通道）',
-    fields: {
-      enabled: { type: 'boolean', default: true },
-      weight: { type: 'number', default: 20, description: '权重越大越常被选中' },
-    },
-  },
-  ovh: {
-    type: 'object',
-    description: 'OVHcloud AI（匿名，2 RPM，备用）',
-    fields: {
-      enabled: { type: 'boolean', default: true },
-      weight: { type: 'number', default: 6 },
-    },
-  },
-  ledger: {
-    type: 'object',
-    description: 'Token 用量统计',
-    fields: {
-      enabled: { type: 'boolean', default: true },
-      showAttemptLevel: { type: 'boolean', default: false, description: '默认显示尝试级而不是逻辑级' },
-      includeBranch: { type: 'boolean', default: false, description: '统计时包含旁支提问' },
-    },
-  },
-  routing: {
-    type: 'object',
-    description: '按需网络分流（直连优先，失败自动走代理）',
-    fields: {
-      enabled: { type: 'boolean', default: true },
-      probeTimeoutMs: { type: 'number', default: 4000 },
-      separateWebRoute: { type: 'boolean', default: true, description: '模型请求与网页抓取分开路由' },
-      followSystemProxy: { type: 'boolean', default: true, description: '跟随本机已有代理客户端' },
-    },
-  },
-  desktop: {
-    type: 'object',
-    description: '桌面操作编排（调用已有桌面控制插件的能力）',
-    fields: {
-      enabled: { type: 'boolean', default: true },
-      autoLaunch: { type: 'boolean', default: true, description: '任务需要时自动拉起应用' },
-    },
-  },
-  guard: {
-    type: 'object',
-    description: '操作边界守门（默认开启）',
-    fields: {
-      enabled: { type: 'boolean', default: true },
-      useAiReview: { type: 'boolean', default: false, description: '灰色地带交给小模型审查' },
-    },
-  },
-  exposeHealth: { type: 'boolean', default: true, description: '暴露 /freebridge/* 状态与统计接口' },
-}
+/**
+ * 设置项 schema。
+ *
+ * 必须是 schemastery schema —— cordis 会对它调 `.validate()`，
+ * 普通对象会让宿主启动时直接炸在 resolveConfig 里（实测会崩 DSH）。
+ */
+export const Config = z.object({
+  enabled: z.boolean().default(true).description('启用 FreeBridge'),
+
+  kilo: z
+    .object({
+      enabled: z.boolean().default(true),
+      weight: z.number().default(20).description('权重越大越常被选中'),
+    })
+    .default({}),
+
+  ovh: z
+    .object({
+      enabled: z.boolean().default(true),
+      weight: z.number().default(6),
+    })
+    .default({}),
+
+  ledger: z
+    .object({
+      enabled: z.boolean().default(true),
+      showAttemptLevel: z.boolean().default(false).description('默认显示尝试级而不是逻辑级'),
+      includeBranch: z.boolean().default(false).description('统计时包含旁支提问'),
+    })
+    .default({}),
+
+  routing: z
+    .object({
+      enabled: z.boolean().default(true),
+      probeTimeoutMs: z.number().default(4000),
+      separateWebRoute: z.boolean().default(true).description('模型请求与网页抓取分开路由'),
+      followSystemProxy: z.boolean().default(true).description('跟随本机已有代理客户端'),
+    })
+    .default({}),
+
+  desktop: z
+    .object({
+      enabled: z.boolean().default(true),
+      autoLaunch: z.boolean().default(true).description('任务需要时自动拉起应用'),
+    })
+    .default({}),
+
+  guard: z
+    .object({
+      enabled: z.boolean().default(true),
+      useAiReview: z.boolean().default(false).description('灰色地带交给小模型审查'),
+    })
+    .default({}),
+
+  exposeHealth: z.boolean().default(true).description('暴露 /freebridge/* 状态与统计接口'),
+})
 
 /**
  * @param {import('cordis').Context} ctx
@@ -202,29 +203,19 @@ export function apply(ctx, config = {}) {
   let registration = null
   let bootstrapped = false
 
-  // 启动全部模块（不阻塞宿主启动）
-  void supervisor.startAll()
-    .then(result => {
-      logger.info?.(`[freebridge] modules running=${result.running.length} degraded=${result.degraded.length}`)
-      if (result.degraded.length > 0) {
-        logger.warn?.(`[freebridge] degraded modules: ${result.degraded.join(', ')} (restart individually via /freebridge/restart?module=)`)
-      }
-      return runBootstrap()
-    })
-    .then(() => {
-      bootstrapped = true
-      registerProvider()
-    })
-    .catch(error => {
-      // 兜底：装配层再怎么错，也要把 provider 注册上，让对话可用
-      logger.warn?.(`[freebridge] init sequence failed: ${error?.message ?? error}`)
-      registerProvider()
-    })
-
-  /** 向宿主注册 provider（模型进选择器） */
+  /**
+   * 向宿主注册 provider。
+   *
+   * **必须在 apply 里同步调用完** —— 宿主一看到 apply 返回就认为插件初始化结束，
+   * 那时如果 adapter 还没注册，插件就会被标成「异常」，模型也不进选择器。
+   * 之前我把这一步放在 bootstrap 的异步 then 里，结果等了几秒才注册，
+   * 宿主早就判完状态了 —— 这就是「显示异常 + 功能全无」的根因。
+   */
   function registerProvider() {
     if (registration !== null) return registration
+
     try {
+      // 注意：registerAdapter 返回的是 dispose 函数本身，不是带 .dispose 的对象
       registration = ctx.llm.registerAdapter([ROUTE], adapter)
     } catch (error) {
       logger.warn?.(`[freebridge] registerAdapter failed: ${error?.message ?? error}`)
@@ -257,9 +248,31 @@ export function apply(ctx, config = {}) {
       logger.warn?.(`[freebridge] registerModelDiscovery failed: ${error?.message ?? error}`)
     }
 
-    logger.info?.('[freebridge] ready — anonymous free LLM routes registered')
+    logger.info?.('[freebridge] provider registered — models available in picker')
     return registration
   }
+
+  // ── 关键顺序：同步注册 provider，然后再异步启动重活 ──
+  // 1) 同步：注册 adapter（宿主立刻能看到 FreeBridge 分组，状态正常）
+  registerProvider()
+
+  // 2) 异步：启动模块 + 探测上游（这些慢活不能挡住宿主初始化）
+  void supervisor.startAll()
+    .then(result => {
+      logger.info?.(`[freebridge] modules running=${result.running.length} degraded=${result.degraded.length}`)
+      if (result.degraded.length > 0) {
+        logger.warn?.(`[freebridge] degraded modules: ${result.degraded.join(', ')} (restart individually via /freebridge/restart?module=)`)
+      }
+      return runBootstrap()
+    })
+    .then(() => {
+      bootstrapped = true
+      logger.info?.('[freebridge] bootstrap complete')
+    })
+    .catch(error => {
+      // 后备：异步链再怎么错，provider 已经注册好了，对话照样可用
+      logger.warn?.(`[freebridge] async init failed (provider still registered): ${error?.message ?? error}`)
+    })
 
   // ── 设置热更新 ──
   ctx.on?.('config', next => {
@@ -269,20 +282,41 @@ export function apply(ctx, config = {}) {
   })
 
   // ── HTTP 接口 ──
+  //
+  // 真实宿主用 server.register({kind:'prefix', path, handler}) 挂路由，
+  // 而不是 server.on('request')。对照 dsh-our-free-model 的用法：
+  //   scoped.effect(() => server.register({ kind:'prefix', path:'/api/xxx', handler }))
+  // 用 inject 是必须的：插件加载早于 webServer 发布，直接 get 会拿到 undefined。
   ctx.inject(['webServer'], scoped => {
-    const server = scoped.webServer?.server ?? scoped.webServer
-    if (typeof server?.on !== 'function') return
+    const server = scoped.webServer
+    if (server === null || server === undefined) return
 
-    server.on('request', (req, res) => {
-      const url = String(req.url ?? '')
-      if (!url.startsWith('/freebridge/')) return
+    const route = (req, res) => {
       try {
-        handleHttp(url, req, res)
+        handleHttp(req.url ?? '/', req, res)
       } catch (error) {
         res.writeHead(500, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: String(error?.message ?? error) }))
       }
-    })
+    }
+
+    // 优先用宿主的 register 接口（真实 DSH 走这条）
+    if (typeof server.register === 'function') {
+      scoped.effect?.(() => server.register({ kind: 'prefix', path: '/freebridge', handler: route }),
+        'freebridge: status + stats api')
+      logger.info?.('freebridge: API mounted at /freebridge')
+      return
+    }
+
+    // 后备：如果宿主暴露的是原生 http.Server，用 request 监听
+    const raw = server.server ?? server
+    if (typeof raw?.on === 'function') {
+      raw.on('request', (req, res) => {
+        if (!String(req.url ?? '').startsWith('/freebridge')) return
+        route(req, res)
+      })
+      logger.info?.('freebridge: API mounted on raw http server at /freebridge')
+    }
   })
 
   function handleHttp(url, req, res) {
@@ -396,9 +430,16 @@ export function apply(ctx, config = {}) {
     }
   }
 
+  // registerAdapter 返回的是 dispose 函数本身（对照 dsh-vision-router 的用法：
+  // 直接 `handle()` 调用），不是带 .dispose 方法的对象。
   ctx.effect?.(() => {
     return () => {
-      registration?.dispose?.()
+      try {
+        if (typeof registration === 'function') registration()
+        else registration?.dispose?.()
+      } catch (error) {
+        logger.warn?.(`[freebridge] provider dispose failed: ${error?.message ?? error}`)
+      }
       void supervisor.stopAll()
     }
   })

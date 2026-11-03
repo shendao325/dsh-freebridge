@@ -5,8 +5,19 @@
  * 用法：node tools/selftest-installed.mjs
  */
 import { pathToFileURL } from 'node:url'
+import fs from 'node:fs'
 
 const PROFILE = 'C:/Users/test/.dsh/profiles/desktop'
+
+/** 检查 package.json 有没有残留 dsh.client 声明（有就会崩客户端组合） */
+async function hasNoClientDeclaration() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(`${PROFILE}/node_modules/dsh-freebridge/package.json`, 'utf8'))
+    return pkg.dsh?.client === undefined
+  } catch {
+    return false
+  }
+}
 
 let pass = 0
 let fail = 0
@@ -27,7 +38,13 @@ try {
 check('导出 name', mod.name === 'freebridge')
 check('导出 inject 含 llm', Array.isArray(mod.inject) && mod.inject.includes('llm'))
 check('导出 apply 函数', typeof mod.apply === 'function')
-check('导出 Config', typeof mod.Config === 'object')
+check('导出 Config（schemastery schema，是函数）', typeof mod.Config === 'function')
+// 这里曾踩过坑：Config 必须是 schemastery schema 且能补全默认值，
+// 否则宿主启动时会在 resolveConfig 里炸掉（实测崩 DSH）。
+const validated = typeof mod.Config === 'function' ? mod.Config({}) : null
+check('Config 可调用并补全默认值', validated?.guard?.enabled === true && validated?.kilo?.weight === 20,
+  JSON.stringify(validated).slice(0, 100))
+check('package.json 不再声明 dsh.client（纯 host 插件）', await hasNoClientDeclaration())
 
 console.log('\n[2] 假宿主跑 apply()')
 const logs = []
