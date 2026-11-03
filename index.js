@@ -46,7 +46,9 @@ export const Config = z.object({
 
   ovh: z
     .object({
-      enabled: z.boolean().default(true),
+      // 默认关闭：只提供 Llama/Qwen，没有用户要的模型，
+      // 开着会每次多跳一次失败（"ovh: server-error"）
+      enabled: z.boolean().default(false),
       weight: z.number().default(6),
     })
     .default({}),
