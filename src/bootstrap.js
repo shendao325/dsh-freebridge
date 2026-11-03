@@ -20,8 +20,10 @@ export const DEFAULTS = Object.freeze({
   enabled: true,
 
   // 匿名上游
+  // ovh 默认关闭：只提供 Llama/Qwen，没有用户要的那些模型，
+  // 开着会让每次请求多跳一次失败（"ovh: server-error"），拖慢又误导
   kilo: { enabled: true, weight: 20 },
-  ovh: { enabled: true, weight: 6 },
+  ovh: { enabled: false, weight: 6 },
 
   // 统计
   ledger: { enabled: true, showAttemptLevel: false, includeBranch: false },
