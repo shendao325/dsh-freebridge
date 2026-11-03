@@ -274,14 +274,18 @@ export class FreeBridgeAdapter {
   async * tryUpstream(upstreamId, wantedModel, options, settings) {
     if (isBlocked(upstreamId)) return 'cooling'
 
+    // 模型名必须是字符串。宿主偶尔会传对象或 undefined，
+    // 直接丢给 resolveModel 会变成 "[object Object]" 导致上游 404。
+    if (typeof wantedModel !== 'string' || wantedModel === '') {
+      const fallback = VERIFIED_MODELS[0]?.id ?? 'kilo-auto/free'
+      this.deps.warn?.(`freebridge: invalid model "${String(wantedModel)}", falling back to ${fallback}`)
+      wantedModel = fallback
+    }
+
     let model
     try {
-      // 不允许静默降级：用户点的是哪个模型就用哪个。
-      // 之前允许降级会导致「点了 nemotron 实际跑的是别的模型」，
-      // 而且降级目标一旦坏了就报 model-rejected，看起来像是模型不可用。
       model = await resolveModel(upstreamId, wantedModel, { allowFallback: false })
     } catch (error) {
-      // 这个上游没有该模型：只跳过，不当作上游故障
       this.deps.warn?.(`freebridge: ${upstreamId} has no model "${wantedModel}": ${error?.message ?? error}`)
       return 'no-model'
     }
@@ -312,10 +316,14 @@ export class FreeBridgeAdapter {
     if (!response.ok) {
       const text = await response.text().catch(() => '')
       const status = response.status
+      // 把上游原始响应完整打出来，方便定位到底是模型名错还是别的
+      const raw = text.slice(0, 300).replace(/\s+/g, ' ')
+      this.deps.warn?.(
+        `freebridge: ${upstreamId} FAILED status=${status} model=${model} wanted=${wantedModel} body=${raw}`
+      )
       // 400/404：模型不认，只跳过不冷却
       if (status === 400 || status === 404) {
-        this.deps.warn?.(`freebridge: ${upstreamId} rejected model "${model}" (${status})`)
-        this.recordAttempt({ sessionId, upstreamId, model, options, ok: false, latencyMs: Date.now() - started, route: routeDecision, error: `model rejected (${status})` })
+        this.recordAttempt({ sessionId, upstreamId, model, options, ok: false, latencyMs: Date.now() - started, route: routeDecision, error: `model rejected (${status}) ${raw}` })
         return 'model-rejected'
       }
       coolDownFrom(upstreamId, response, 20000)
@@ -479,13 +487,80 @@ function buildPayload(model, options) {
     stream: true,
   }
   if (Number.isFinite(options.maxTokens) && options.maxTokens > 0) {
+    // 上游有输出上限，这里统一夹一下，避免 max_tokens 超过模型能力
     payload.max_tokens = options.maxTokens
   }
   if (Number.isFinite(options.temperature)) payload.temperature = options.temperature
-  if (Array.isArray(options.tools) && options.tools.length > 0) {
-    payload.tools = options.tools
-  }
+
+  // tools 必须转成 OpenAI 格式：{type:'function', function:{name, description, parameters}}
+  // DSH 传的是 Anthropic 风格 {name, description, input_schema}，直接透传会被上游
+  // 拒绝 400 "missing field `type`" —— 这是实机 model-rejected 的真因。
+  const tools = toOpenAITools(options.tools)
+  if (tools !== null) payload.tools = tools
+
   return payload
+}
+
+/**
+ * 把各种 tools 格式统一成 OpenAI chat.completions 的格式。
+ *
+ * 接受的输入形态：
+ * 1. 已经合规的：{ type:'function', function:{ name, description, parameters } }
+ * 2. Anthropic 风格：{ name, description, input_schema }
+ * 3. 简化风格：{ name, description, parameters }
+ *
+ * @returns {Array|null} 转换后的数组；无 tools 返回 null
+ */
+function toOpenAITools(tools) {
+  if (!Array.isArray(tools) || tools.length === 0) return null
+
+  const out = []
+  for (const tool of tools) {
+    if (tool === null || typeof tool !== 'object') continue
+
+    // 形态 1：已经带 type: 'function'
+    if (tool.type === 'function' && tool.function !== undefined) {
+      const fn = tool.function
+      if (typeof fn?.name !== 'string' || fn.name === '') continue
+      out.push({
+        type: 'function',
+        function: {
+          name: fn.name,
+          description: typeof fn.description === 'string' ? fn.description : '',
+          parameters: normalizeParameters(fn.parameters ?? fn.input_schema),
+        },
+      })
+      continue
+    }
+
+    // 形态 2/3：扁平结构
+    const name = tool.name ?? tool.function?.name
+    if (typeof name !== 'string' || name === '') continue
+    out.push({
+      type: 'function',
+      function: {
+        name,
+        description: typeof tool.description === 'string' ? tool.description : '',
+        // Anthropic 用 input_schema，OpenAI 用 parameters
+        parameters: normalizeParameters(tool.input_schema ?? tool.parameters),
+      },
+    })
+  }
+
+  return out.length > 0 ? out : null
+}
+
+/** 保证 parameters 是一个合法的 JSON Schema object */
+function normalizeParameters(schema) {
+  if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) {
+    return { type: 'object', properties: {} }
+  }
+  const out = { ...schema }
+  if (typeof out.type !== 'string') out.type = 'object'
+  if (out.type === 'object' && (out.properties === undefined || out.properties === null || typeof out.properties !== 'object')) {
+    out.properties = {}
+  }
+  return out
 }
 
 /** 把 messages 拼成纯文本，只用于本地 token 估算 */
