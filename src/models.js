@@ -31,13 +31,6 @@ export const VERIFIED_MODELS = [
     note: '专攻代码，出字干脆',
   },
   {
-    id: 'nvidia/nemotron-3.5-lightning:free',
-    name: 'Nemotron 3.5 Lightning',
-    tier: 'fast',
-    verified: true,
-    note: '1M 上下文，速度快',
-  },
-  {
     id: 'dots-studio/dots-3-note-preview:free',
     name: 'Dots3 Note',
     tier: 'vision',
@@ -48,6 +41,7 @@ export const VERIFIED_MODELS = [
 
 /** 实测不可用 —— 直接从白名单剔除，不显示给用户 */
 export const EXCLUDED_MODELS = [
+  { id: 'nvidia/nemotron-3.5-lightning:free', reason: '实测返回空内容（思维链吃光 token），不可靠' },
   { id: 'kilo-auto/efficient', reason: '401 PAID_MODEL_AUTH_REQUIRED' },
   { id: 'kilo-auto/frontier', reason: '401 PAID_MODEL_AUTH_REQUIRED' },
   { id: 'kilo-auto/balanced', reason: '401 PAID_MODEL_AUTH_REQUIRED' },
