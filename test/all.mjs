@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 const here = path.dirname(fileURLToPath(import.meta.url))
 
 const suites = [
+  ['inject 守卫（实机崩溃复现）', 'inject-guard.test.mjs'],
   ['注册时序（核心回归）', 'registration.test.mjs'],
   ['功能可用性（真实宿主 HTTP）', 'functions.test.mjs'],
   ['账本（模块一）', 'ledger.test.mjs'],

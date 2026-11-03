@@ -9,6 +9,7 @@
  * @module dsh-freebridge
  */
 
+import os from 'node:os'
 import path from 'node:path'
 import FileSystem from 'node:fs'
 import z from '@deepseek-ai/schemastery'
@@ -92,7 +93,7 @@ export function apply(ctx, config = {}) {
   const warn = message => logger.warn?.(message)
 
   const supervisor = new Supervisor({ logger })
-  const dataDir = resolveDataDir(ctx)
+  const dataDir = resolveDataDir()
 
   // ── 模块一：Token 账本 ──
   supervisor.register('ledger', {
@@ -452,7 +453,9 @@ export function apply(ctx, config = {}) {
  * 宿主有这个能力就注册进来，没有就让编排层走回退提示。
  */
 function registerHostDesktopCapabilities(ctx, orchestrator, warn) {
-  const launcher = ctx.get?.('desktopControl') ?? ctx.desktopControl ?? null
+  // 只能用 ctx.get() 查询服务（这是查询接口，不触发 inject 守卫）。
+  // 直接写 ctx.desktopControl 会抛 "cannot get property without inject"。
+  const launcher = ctx.get?.('desktopControl') ?? null
   if (launcher === null || launcher === undefined) {
     // 宿主没有桌面控制插件：不注册能力，编排层会给出「请手动打开」提示
     return
@@ -469,12 +472,32 @@ function registerHostDesktopCapabilities(ctx, orchestrator, warn) {
   }
 }
 
-/** 数据目录：优先宿主目录，退临时目录，保证总能启动 */
-function resolveDataDir(ctx) {
-  const candidates = [
-    typeof ctx?.dshHomePath === 'function' ? ctx.dshHomePath('freebridge') : null,
-    typeof ctx?.storagePath === 'string' ? path.join(ctx.storagePath, 'freebridge') : null,
-  ]
+/**
+ * 数据目录。
+ *
+ * **绝不能读 ctx.storagePath / ctx.dshHomePath 这类未声明的属性** ——
+ * cordis 有 inject 守卫：读一个没在 `inject` 里声明过的 ctx 属性会直接抛
+ * "cannot get property X without inject"，整个插件激活失败。
+ * 这个错误曾让插件在用户机器上一直显示「异常」。
+ *
+ * 正确做法：自己用 os.homedir() 拼出 ~/.dsh 下的目录（同 dsh-session-remove）。
+ */
+function resolveDataDir() {
+  const candidates = []
+
+  // 1. 标准位置：~/.dsh/freebridge
+  try {
+    candidates.push(path.join(os.homedir(), '.dsh', 'freebridge'))
+  } catch {
+    // 拿不到 home 就跳过
+  }
+
+  // 2. 环境变量兜底
+  if (process.env.DSH_HOME) candidates.push(path.join(process.env.DSH_HOME, 'freebridge'))
+
+  // 3. 临时目录兜底
+  candidates.push(path.join(os.tmpdir(), 'freebridge'))
+
   for (const candidate of candidates) {
     if (typeof candidate !== 'string' || candidate === '') continue
     try {
@@ -484,13 +507,9 @@ function resolveDataDir(ctx) {
       // 试下一个
     }
   }
-  const fallback = path.join(process.env.TEMP ?? process.env.TMPDIR ?? '.', 'freebridge')
-  try {
-    FileSystem.mkdirSync(fallback, { recursive: true })
-  } catch {
-    // 实在不行用当前目录
-  }
-  return fallback
+
+  // 4. 最后兜底：当前目录（连临时目录都写不了的话）
+  return process.cwd()
 }
 
 /** 读引导答案（存过就复用，坏了就当没存过） */
