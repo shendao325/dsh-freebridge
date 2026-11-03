@@ -1,6 +1,6 @@
 # FreeBridge — DSH 一体化插件
 
-**装完即用。不用登录、不用注册、不用填 API Key，模型直接出现在选择器里。**
+**装完即用。不用登录、不用注册、不用填 API Key，模型直接出现在选择器里，设置页有完整界面。**
 
 一个插件把六件事全包了：匿名免费模型桥接、Token 用量统计、按需网络分流、桌面操作编排、操作边界守门、插件级故障隔离。
 
@@ -8,7 +8,41 @@
 
 ---
 
+## 设置页在哪
+
+装好后重启 DSH，打开 **设置**，左侧栏会多出一项 **FreeBridge**。点进去能看到：
+
+| 面板 | 内容 |
+|---|---|
+| **模块状态** | 每个模块的实时状态标签 + 单独重启按钮 |
+| **Token 用量** | 总计 / 输入 / 输出 / 请求数，逻辑级 ↔ 尝试级切换，按渠道、按模型、按日趋势 |
+| **会话统计** | 点击任一会话展开：会话 → 供应商 → 模型 三层下钻，标注主线/旁支/已编辑/已撤回，显示切换段 |
+| **网络分流** | 直连 / 代理数量、节点健康状态 |
+| **操作守门** | 开关状态与规则数量 |
+| **桌面编排** | 已接入的桌面能力、已登记的应用 |
+| **首次引导** | 引导卡片 + 「全部用默认值」按钮 |
+
+数据全部来自插件自己的同源接口 `/freebridge/*`。
+
+---
+
 ## 装完即用
+
+**方式一：本地安装脚本（推荐）**
+
+```bash
+git clone https://github.com/shendao325/dsh-freebridge.git
+cd dsh-freebridge
+node tools/install-local.mjs
+```
+
+脚本会做三件事：把插件**实体拷贝**到 profile 的 `node_modules`、把 `dsh-freebridge` 注册进 `dsh.profile.bundles`、确认挂载点。
+
+> 必须用实体拷贝而不是软链接：Node 按真实路径解析模块，软链接会让插件找不到宿主的 `@deepseek-ai/schemastery`，导致启动崩溃。
+
+重启 DSH。
+
+**方式二：标准插件命令**
 
 ```bash
 dsh plugin --profile desktop add dsh-freebridge
@@ -152,8 +186,9 @@ dsh plugin --profile desktop add dsh-freebridge
 ```
 freebridge/
 ├── index.js              # 插件入口：name / inject / apply / Config
+├── client.js             # 设置页 UI（ModuleLoader 加载，无需构建）
 ├── src/
-│   ├── adapter.js        # provider 适配器（harness 契约）+ 记账/分流串联
+│   ├── adapter.js        # provider 适配器（7 方法契约）+ 记账/分流串联
 │   ├── upstream.js       # 上游调用、模型目录缓存、冷却
 │   ├── parse.js          # SSE 解析 -> chunk 事件
 │   ├── ledger.js         # 模块一：Token 账本
@@ -162,7 +197,9 @@ freebridge/
 │   ├── guard.js          # 模块四：操作守门
 │   ├── bootstrap.js      # 模块五：零配置
 │   └── supervisor.js     # 模块六：故障隔离
-├── test/                 # 209 项断言，8 个套件
+├── test/                 # 356 项断言，14 个套件
+├── tools/
+│   └── install-local.mjs # 本地安装脚本
 ├── cordis.patch.yml
 ├── package.json
 └── README.md
@@ -178,18 +215,41 @@ freebridge/
 node test/all.mjs
 ```
 
-8 个套件、209 项断言：
+14 个套件、356 项断言：
 
 | 套件 | 覆盖 |
 |---|---|
+| `contract.test.mjs` | adapter 7 方法契约逐项校验（防 `resolveModel is not a function`） |
+| `inject-guard.test.mjs` | 真实 fiber 下验证不违反 cordis inject 守卫，内置对照实验 |
+| `client.test.mjs` | UI 契约与六模块覆盖 |
+| `client-render.test.mjs` | 真实执行 client.js，验证注册与渲染 |
 | `ledger.test.mjs` | 双计数、编辑不回溯、旁支、持久化、不存原文 |
 | `router.test.mjs` | 直连学习、节点只标记不删、两种策略独立 |
 | `guard.test.mjs` | 三层判定、AI 降级、规则可枚举 |
 | `desktop.test.mjs` | 需要才拉起、无能力回退、守门串联 |
 | `bootstrap.test.mjs` | 默认值、引导、探测失败不阻塞 |
 | `supervisor.test.mjs` | 降级隔离、单独重启、use 兜底 |
+| `registration.test.mjs` | apply 返回时 adapter 必须已注册 |
+| `functions.test.mjs` | 真实宿主 HTTP 契约下六模块接口全通 |
 | `integration.test.mjs` | 六模块端到端协同 |
-| `host.test.mjs` | 假宿主跑 apply()，真实上游 408 模型 |
+| `host.test.mjs` | 假宿主跑 apply()，真实上游拉模型 |
+
+---
+
+## 踩过的坑（这些都会让插件崩溃）
+
+这类坑我全踩过，写在这里省得别人再踩：
+
+| 现象 | 原因 |
+|---|---|
+| `cannot get property "storagePath" without inject` | 读了未在 `inject` 声明的 ctx 属性。cordis 对活跃 fiber 直接抛错，插件激活失败、界面显示异常。改用 `os.homedir()` 不碰 ctx |
+| `registration.adapter.resolveModel is not a function` | adapter 缺宿主必需方法。必须实现 7 个：`providerInfo` / `providerRetryPolicy` / `imageRequestPricing` / `listModels` / `resolveModel` / `prepareCall` / `stream` |
+| `Cannot read properties of undefined (reading 'validate')` | `Config` 必须是 schemastery schema（`z.object`），普通对象会被 cordis 在 `resolveConfig` 里调 `.validate` 时炸掉 |
+| `declares dsh.client but exports no "./client" bundle` | 声明了 `dsh.client` 就必须有 `./client` 导出，两者必须匹配 |
+| 插件显示「异常」、模型不进选择器 | `registerAdapter` 必须在 `apply` **同步执行期间**调用。放在异步 `.then()` 里，宿主早就判完状态了 |
+| 设置页接口全 404 | 真实宿主用 `server.register({kind:'prefix', path, handler})`，不是 `server.on('request')` |
+| 启动时找不到 `@deepseek-ai/schemastery` | 不能用软链接安装。Node 按真实路径解析，软链接会让插件从工作区往上找依赖。必须实体拷贝 |
+| `registerAdapter` 返回值用法错 | 它返回的是 **dispose 函数本身**，直接 `fn()` 调用，不是 `.dispose()` |
 
 ---
 
